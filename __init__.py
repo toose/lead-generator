@@ -11,9 +11,9 @@ class Lead():
         self.category = category
         self.phone = phone
         self.street = street
-        self.parse_locale(locale)
+        self._parse_locale(locale)
     
-    def parse_locale(self, locale):
+    def _parse_locale(self, locale):
         if locale is not None:
             regex = re.compile(r'(.*),\s(\w{2})\s(\d{5})')
             match = regex.match(locale)
@@ -45,10 +45,18 @@ class WebPage():
         response.raise_for_status()
         return response
 
+    def _get_next_page(self):
+        pass
+
     def parse_results(self):
+        results = []
         response = self._get_response(keyword=self.keyword, location=self.location)
         soup = BeautifulSoup(response.content, 'html.parser')
-        return soup.find_all(id=re.compile('^lid'))
+        results = soup.find_all(id=re.compile('^lid')) # First page results
+        pagination = soup.find(class_='pagination')
+        pages = pagination.find_all('a')
+        #for page in pages: 
+
 
 
 
