@@ -14,7 +14,7 @@ class Lead():
         self._parse_locale(locale)
     
     def _parse_locale(self, locale):
-        if locale is not None:
+        if locale:
             regex = re.compile(r'(.*),\s(\w{2})\s(\d{5})')
             match = regex.match(locale)
             self.city = match.groups()[0]
@@ -38,26 +38,34 @@ class WebPage():
             self.logger.debug(uri)
         return uri        
 
-    def _get_response(self, keyword, location):
+    def _get_first_response(self, keyword, location):
         search_terms = {'search_terms': keyword, 'geo_location_terms': location}
         uri = self._get_uri(search_terms)
         response = requests.get(uri)
         response.raise_for_status()
         return response
 
-    def _get_next_page(self):
-        pass
+    def _get_next_response(self, link):
+        response = requests.get(self.uri + link)
+        parser = BeautifulSoup(response.content, 'html.parser')
+        return parser.find_all(id=re.compile('^lid')) # First page results
 
-    def parse_results(self):
-        results = []
-        response = self._get_response(keyword=self.keyword, location=self.location)
-        soup = BeautifulSoup(response.content, 'html.parser')
-        results = soup.find_all(id=re.compile('^lid')) # First page results
-        pagination = soup.find(class_='pagination')
+    def _get_page_links(self, parser):
+        pagination = parser.find(class_='pagination')
         pages = pagination.find_all('a')
-        #for page in pages: 
-
-
+        links = list(set([x['href'] for x in pages]))
+        links.append(links[0][:len(links[0])-1] + '1') # Add page one to results
+        links.sort()
+        return links
+                
+    def get_leads(self):
+        results = []
+        response = self._get_first_response(keyword=self.keyword, location=self.location)
+        parser = BeautifulSoup(response.content, 'html.parser')
+        links = self._get_page_links(parser)
+        for link in links:
+            results += self._get_next_response(link)
+        return results
 
 
 def main():
@@ -80,11 +88,11 @@ def main():
     
     lead_list = []
     web_page = WebPage(keyword=args.keyword, location=args.location)
-    results = web_page.parse_results()
+    results = web_page.get_leads()
     for result in results:
         name = result.find(class_='business-name').string if result.find(
             class_='business-name') else ''
-        category = ','.join([x for x in result.find(class_='categories').strings])
+        category = ', '.join([x for x in result.find(class_='categories').strings])
         phone = result.find(class_='phone').string if result.find(
             class_='phone') else ''
         street = result.find(class_='street-address').string if result.find(
@@ -94,6 +102,7 @@ def main():
         lead = Lead(name=name, phone=phone, street=street, locale=locale,
                     category=category)
         lead_list.append(lead)
+    print(lead_list)
 
     
 if __name__ == '__main__':
