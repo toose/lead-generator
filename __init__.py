@@ -3,7 +3,7 @@
 import os, requests, logging, argparse
 from urllib import parse
 from bs4 import BeautifulSoup
-import re
+import re, math
 
 class Lead():
     def __init__(self, name, phone, street, locale, category):
@@ -31,40 +31,40 @@ class WebPage():
         self.location = location
         self.logger = logging.getLogger('scrape.webpage')
 
-    def _get_uri(self, search= {}):
+    def _get_uri(self, search=None):
         uri = self.uri
         if search:
             uri += '/search?{}'.format(parse.urlencode(search))
             self.logger.debug(uri)
         return uri        
 
-    def _get_first_response(self, keyword, location):
-        search_terms = {'search_terms': keyword, 'geo_location_terms': location}
+    def _get_response(self, keyword, location, page=None):
+        search_terms = [('search_terms', keyword), ('geo_location_terms', location)]
+        if page is not None:
+            search_terms.append(('page', page))
         uri = self._get_uri(search_terms)
         response = requests.get(uri)
         response.raise_for_status()
         return response
 
-    def _get_next_response(self, link):
-        response = requests.get(self.uri + link)
+    def _get_results(self, response):
         parser = BeautifulSoup(response.content, 'html.parser')
         return parser.find_all(id=re.compile('^lid')) # First page results
 
-    def _get_page_links(self, parser):
+    def _get_num_pages(self, parser):
         pagination = parser.find(class_='pagination')
-        pages = pagination.find_all('a')
-        links = list(set([x['href'] for x in pages]))
-        links.append(links[0][:len(links[0])-1] + '1') # Add page one to results
-        links.sort()
-        return links
+        regex = re.search(r'(\d+)', pagination.p.text)
+        num_results = int(regex.groups()[0])
+        return math.ceil(num_results / 30)
                 
     def get_leads(self):
         results = []
-        response = self._get_first_response(keyword=self.keyword, location=self.location)
+        response = self._get_response(keyword=self.keyword, location=self.location)
         parser = BeautifulSoup(response.content, 'html.parser')
-        links = self._get_page_links(parser)
-        for link in links:
-            results += self._get_next_response(link)
+        num_pages = self._get_num_pages(parser)
+        for num in range(1, num_pages):
+            response = self._get_response(self.keyword, self.location, num)
+            results += self._get_results(response)
         return results
 
 
