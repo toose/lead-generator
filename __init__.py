@@ -3,7 +3,7 @@
 import os, requests, logging, argparse
 from urllib import parse
 from bs4 import BeautifulSoup
-import re, math
+import re, math, time
 
 class Lead():
     def __init__(self, name, phone, street, locale, category):
@@ -47,25 +47,47 @@ class WebPage():
         response.raise_for_status()
         return response
 
-    def _get_results(self, response):
-        parser = BeautifulSoup(response.content, 'html.parser')
-        return parser.find_all(id=re.compile('^lid')) # First page results
-
     def _get_num_pages(self, parser):
         pagination = parser.find(class_='pagination')
         regex = re.search(r'(\d+)', pagination.p.text)
         num_results = int(regex.groups()[0])
         return math.ceil(num_results / 30)
+
+    def _get_results(self, response):
+        parser = BeautifulSoup(response.content, 'html5lib')
+        #return parser.find_all(id=re.compile('^lid')) # First page results
+        return parser.find_all(class_='result')
+
+    def _parse_results(self, results):
+        parsed_results = []
+        for result in results:
+            name = result.find(class_='business-name').string if result.find(
+                class_='business-name') else ''
+            category = ', '.join([x for x in result.find(class_='categories').strings])
+            phone = result.find(class_='phone').string if result.find(
+                class_='phone') else ''
+            street = result.find(class_='street-address').string if result.find(
+                class_='street-address') else ''
+            locale = result.find(class_='locality').string if result.find(
+                class_='locality') else ''
+            #self.logger.debug(f'Name: {name}; Category: {category}; Phone: {phone}; ' + 
+                                #f'Street: {street}; Locality: {locale}')
+            self.logger.debug(f'Name: {name}; Locality: {locale}')
+            parsed_results.append((name, category, phone, street, locale))
+        return parsed_results
                 
     def get_leads(self):
         results = []
-        response = self._get_response(keyword=self.keyword, location=self.location)
+        response = self._get_response(self.keyword, self.location)
         parser = BeautifulSoup(response.content, 'html.parser')
         num_pages = self._get_num_pages(parser)
+        self.logger.info(f'{num_pages} total pages of results')
         for num in range(1, num_pages):
             response = self._get_response(self.keyword, self.location, num)
             results += self._get_results(response)
-        return results
+        parsed_results = self._parse_results(results)
+        #self.logger.debug(parsed_results)
+        return parsed_results
 
 
 def main():
@@ -90,18 +112,11 @@ def main():
     web_page = WebPage(keyword=args.keyword, location=args.location)
     results = web_page.get_leads()
     for result in results:
-        name = result.find(class_='business-name').string if result.find(
-            class_='business-name') else ''
-        category = ', '.join([x for x in result.find(class_='categories').strings])
-        phone = result.find(class_='phone').string if result.find(
-            class_='phone') else ''
-        street = result.find(class_='street-address').string if result.find(
-            class_='street-address') else ''
-        locale = result.find(class_='locality').string if result.find(
-            class_='locality') else ''
+        name, category, phone, street, locale = result
         lead = Lead(name=name, phone=phone, street=street, locale=locale,
                     category=category)
         lead_list.append(lead)
+    logger.info('Leads created successfully.')
     print(lead_list)
 
     
