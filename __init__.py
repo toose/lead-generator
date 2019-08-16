@@ -69,25 +69,35 @@ class WebPage():
             uri: The uri to scrape for.
 
         Returns:
-            One or more email address in string format.
+            One or more email address, comma in separated format.
         """
 
         with requests.Session() as session:
             try:
+                self.logger.debug(f'Uri: {uri}')
                 response = session.get(uri, timeout=2)
                 response.raise_for_status()
                 parser = BeautifulSoup(response.text, 'html5lib')
                 for link in parser.find_all('a'):
                     if re.search(r'contact', link['href']):
+                        if re.match(r'^/', link['href']):
+                            link['href'] = uri + link['href']
+                        logging.debug('Contact page uri: {}'.format(link['href']))
                         contact_page = session.get(link['href'])
-                        re_email = re.search(r"(^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$)", 
+                        email_list = re.findall(r'mailto:([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)', 
                                                 contact_page.text)
-                        return ''
+                        if email_list:
+                            return ', '.join(x for x in set(email_list))
+                        else:
+                            return ''
             except requests.exceptions.ConnectTimeout:
                 self.logger.debug(f'Session timeout: {uri}')
                 return ''
             except requests.exceptions.HTTPError:
                 self.logger.debug(f'HTTP Error occured - Response status: {response.status_code}')
+                return ''
+            except:
+                self.logger.debug('An unknown error occured')
                 return ''
 
     def _get_results(self, response):
@@ -108,12 +118,13 @@ class WebPage():
             street = street.get_text(strip=True, separator=" ") if street else ''
             locale = locale.get_text(strip=True, separator=" ") if locale else ''
             website = website['href'] if website else ''
-            if website:
-                email = self._get_email_address(website)
-            self.logger.debug(f'Name: {name}; Category: {category}; Phone: {phone}; ' + 
+            email = self._get_email_address(website) if website else ''
+            
+            self.logger.debug(f'Name: {name}; Category: {category}; Email: {email}; Phone: {phone}; ' + 
                 f'Street: {street}; Locality: {locale}; Website: {website}; Link: {link}')
-            results.append({'BusinessName': name, 'Category': category, 'Phone': phone,
-                            'Street': street, 'Locale': locale, 'Website': website, 'Link': link})
+            results.append({'BusinessName': name, 'Category': category, 
+                            'Email': email, 'Phone': phone,'Street': street, 
+                            'Locale': locale, 'Website': website, 'Link': link})
         return results
                 
     def get_leads(self):
@@ -153,7 +164,8 @@ def main():
     web_page = WebPage(keyword=args.keyword, location=args.location)
     results = web_page.get_leads()
     with open(args.output_file, 'w', newline='') as csvfile:
-        fieldnames = ['BusinessName', 'Category', 'Phone', 'Street', 'City', 'State', 'Zip', 'Website', 'Link']
+        fieldnames = ['BusinessName', 'Category', 'Email', 'Phone', 'Street', 
+                      'City', 'State', 'Zip', 'Website', 'Link']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
         for result in results:
