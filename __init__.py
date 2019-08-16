@@ -17,9 +17,10 @@ class Lead():
         if locale:
             regex = re.compile(r'(.*),\s(\w{2})\s(\d{5})')
             match = regex.match(locale)
-            self.city = match.groups()[0]
-            self.state = match.groups()[1]
-            self.postal = match.groups()[2]
+            if match is not None:
+                self.city = match.groups()[0]
+                self.state = match.groups()[1]
+                self.postal = match.groups()[2]
         else:
             self.city, self.state, self.postal = '', '', ''
 
@@ -43,8 +44,10 @@ class WebPage():
         if page is not None:
             search_terms.append(('page', page))
         uri = self._get_uri(search_terms)
-        response = requests.get(uri)
-        response.raise_for_status()
+        with requests.Session() as session:
+            session.headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.95 Safari/537.36'}
+            response = session.get(uri)
+            response.raise_for_status()
         return response
 
     def _get_num_pages(self, parser):
@@ -54,40 +57,37 @@ class WebPage():
         return math.ceil(num_results / 30)
 
     def _get_results(self, response):
-        parser = BeautifulSoup(response.content, 'html5lib')
-        #return parser.find_all(id=re.compile('^lid')) # First page results
-        return parser.find_all(class_='result')
+        results = []
+        parser = BeautifulSoup(response.text, 'html5lib')
+        for result in parser.select('.search-results .result'):
+            name = result.select_one('.business-name')
+            category = result.select_one('.categories')
+            phone = result.select_one('.phones')
+            street = result.select_one('.street-address')
+            locale = result.select_one('.locality')
 
-    def _parse_results(self, results):
-        parsed_results = []
-        for result in results:
-            name = result.find(class_='business-name').string if result.find(
-                class_='business-name') else ''
-            category = ', '.join([x for x in result.find(class_='categories').strings])
-            phone = result.find(class_='phone').string if result.find(
-                class_='phone') else ''
-            street = result.find(class_='street-address').string if result.find(
-                class_='street-address') else ''
-            locale = result.find(class_='locality').string if result.find(
-                class_='locality') else ''
+            name = name.get_text(strip=True, separator=" ") if name else ''
+            category = category.get_text(strip=True, separator=", ") if category else ''
+            phone = phone.get_text(strip=True, separator=" ") if phone else ''
+            street = street.get_text(strip=True, separator=" ") if street else ''
+            locale = locale.get_text(strip=True, separator=" ") if locale else ''
             #self.logger.debug(f'Name: {name}; Category: {category}; Phone: {phone}; ' + 
-                                #f'Street: {street}; Locality: {locale}')
+                #f'Street: {street}; Locality: {locale}')
             self.logger.debug(f'Name: {name}; Locality: {locale}')
-            parsed_results.append((name, category, phone, street, locale))
-        return parsed_results
+            results.append((name, category, phone, street, locale))
+        return results
                 
     def get_leads(self):
         results = []
         response = self._get_response(self.keyword, self.location)
-        parser = BeautifulSoup(response.content, 'html.parser')
+        parser = BeautifulSoup(response.text, 'html5lib')
         num_pages = self._get_num_pages(parser)
         self.logger.info(f'{num_pages} total pages of results')
         for num in range(1, num_pages):
             response = self._get_response(self.keyword, self.location, num)
             results += self._get_results(response)
-        parsed_results = self._parse_results(results)
         #self.logger.debug(parsed_results)
-        return parsed_results
+        return results
 
 
 def main():
