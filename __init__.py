@@ -1,27 +1,8 @@
 #!/usr/bin/env python3
 
-import os, requests, logging, argparse
+import re, math, time, csv, os, requests, logging, argparse
 from urllib import parse
 from bs4 import BeautifulSoup
-import re, math, time
-
-class Lead():
-    def __init__(self, name, phone, street, locale, category):
-        self.name = name
-        self.category = category
-        self.phone = phone
-        self.street = street
-        self._parse_locale(locale)
-    
-    def _parse_locale(self, locale):
-        if locale:
-            regex = re.compile(r'(.*),\s(\w{2})\s(\d{5})')
-            match = regex.match(locale)
-            self.city = match.groups()[0]
-            self.state = match.groups()[1]
-            self.postal = match.groups()[2]
-        else:
-            self.city, self.state, self.postal = '', '', ''
 
 
 class WebPage():
@@ -64,16 +45,19 @@ class WebPage():
             phone = result.select_one('.phones')
             street = result.select_one('.street-address')
             locale = result.select_one('.locality')
+            website = result.select_one('.track-visit-website')
 
+            link = parse.urljoin(self.uri, name['href']) if name else ''
             name = name.get_text(strip=True, separator=" ") if name else ''
             category = category.get_text(strip=True, separator=", ") if category else ''
             phone = phone.get_text(strip=True, separator=" ") if phone else ''
             street = street.get_text(strip=True, separator=" ") if street else ''
             locale = locale.get_text(strip=True, separator=" ") if locale else ''
+            website = website['href'] if website else ''
             self.logger.debug(f'Name: {name}; Category: {category}; Phone: {phone}; ' + 
-                f'Street: {street}; Locality: {locale}')
-            #self.logger.debug(f'Name: {name}; Locality: {locale}')
-            results.append((name, category, phone, street, locale))
+                f'Street: {street}; Locality: {locale}; Website: {website}; Link: {link}')
+            results.append({'BusinessName': name, 'Category': category, 'Phone': phone,
+                            'Street': street, 'Locale': locale, 'Website': website, 'Link': link})
         return results
                 
     def get_leads(self):
@@ -94,6 +78,7 @@ def main():
     parser = argparse.ArgumentParser(description='Sales lead scraper')
     parser.add_argument('-k', '--keyword', required=True)
     parser.add_argument('-l', '--location', required=True)
+    parser.add_argument('-o', '--output-file', required=True)
     parser.add_argument('-v', '--verbose', action='count')
     args = parser.parse_args()
 
@@ -111,12 +96,20 @@ def main():
     lead_list = []
     web_page = WebPage(keyword=args.keyword, location=args.location)
     results = web_page.get_leads()
-    for result in results:
-        name, category, phone, street, locale = result
-        lead = Lead(name=name, phone=phone, street=street, locale=locale,
-                    category=category)
-        lead_list.append(lead)
-    logger.info('Leads created successfully.')
+    with open(args.output_file, 'w', newline='') as csvfile:
+        fieldnames = ['BusinessName', 'Category', 'Phone', 'Street', 'City', 'State', 'Zip', 'Website', 'Link']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        for result in results:
+            regex = re.compile(r'(.*),\s(\w{2})\s(\d{5})')
+            match = regex.match(result['Locale'])
+            result['City'] = match.groups()[0] if match else ''
+            result['State'] = match.groups()[1] if match else ''
+            result['Zip'] = match.groups()[2] if match else ''
+            del result['Locale']
+            writer.writerow(result)
+
+    logger.info(f'Lead file created successfully: {args.output_file}')
 
     
 if __name__ == '__main__':
