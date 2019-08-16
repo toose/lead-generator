@@ -6,6 +6,17 @@ from bs4 import BeautifulSoup
 
 
 class WebPage():
+    """Webpage scraper class.
+
+    Scrapes yellowpages.com for business information based on a 
+    keyword and location.
+
+    Attributes:
+        uri: The uri/url to scrape (default: https://yellowpages.com)
+        keyword: Search terms against yellowpages.com.
+        location: the location to search for, e.g. New York, NY.
+    """
+
     def __init__(self, keyword, location, uri='https://yellowpages.com'):
         self.uri = uri
         self.keyword = keyword
@@ -15,6 +26,13 @@ class WebPage():
         self.logger = logging.getLogger('scrape.webpage')
 
     def _get_uri(self, search=None):
+        """Creates the full url to fetch results from.
+
+        Includes any keyword, location and page parameters.
+
+        Args:
+            search: A dict mapping 
+        """
         uri = self.uri
         if search:
             uri += '/search?{}'.format(parse.urlencode(search))
@@ -22,6 +40,14 @@ class WebPage():
         return uri        
 
     def _get_response(self, keyword, location, page=None):
+        """Returns a response object.
+        Args:
+            keyword: Search terms against yellowpages.com.
+            location: the location to search for, e.g. New York, NY.
+        Returns:
+            Response object.
+        """
+
         search_terms = [('search_terms', keyword), ('geo_location_terms', location)]
         if page is not None:
             search_terms.append(('page', page))
@@ -35,6 +61,34 @@ class WebPage():
         regex = re.search(r'(\d+)', pagination.p.text)
         num_results = int(regex.groups()[0])
         return math.ceil(num_results / 30)
+    
+    def _get_email_address(self, uri):
+        """Scrapes the target URI for one or more email addresses
+
+        Args:
+            uri: The uri to scrape for.
+
+        Returns:
+            One or more email address in string format.
+        """
+
+        with requests.Session() as session:
+            try:
+                response = session.get(uri, timeout=2)
+                response.raise_for_status()
+                parser = BeautifulSoup(response.text, 'html5lib')
+                for link in parser.find_all('a'):
+                    if re.search(r'contact', link['href']):
+                        contact_page = session.get(link['href'])
+                        re_email = re.search(r"(^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$)", 
+                                                contact_page.text)
+                        return ''
+            except requests.exceptions.ConnectTimeout:
+                self.logger.debug(f'Session timeout: {uri}')
+                return ''
+            except requests.exceptions.HTTPError:
+                self.logger.debug(f'HTTP Error occured - Response status: {response.status_code}')
+                return ''
 
     def _get_results(self, response):
         results = []
@@ -54,6 +108,8 @@ class WebPage():
             street = street.get_text(strip=True, separator=" ") if street else ''
             locale = locale.get_text(strip=True, separator=" ") if locale else ''
             website = website['href'] if website else ''
+            if website:
+                email = self._get_email_address(website)
             self.logger.debug(f'Name: {name}; Category: {category}; Phone: {phone}; ' + 
                 f'Street: {street}; Locality: {locale}; Website: {website}; Link: {link}')
             results.append({'BusinessName': name, 'Category': category, 'Phone': phone,
