@@ -57,10 +57,13 @@ class WebPage():
         return response
 
     def _get_num_pages(self, parser):
-        pagination = parser.find(class_='pagination')
-        regex = re.search(r'(\d+)', pagination.p.text)
-        num_results = int(regex.groups()[0])
-        return math.ceil(num_results / 30)
+        try:
+            pagination = parser.find(class_='pagination')
+            regex = re.search(r'(\d+)', pagination.p.text)
+            num_results = int(regex.groups()[0])
+            return math.ceil(num_results / 30)
+        except:
+            return 1
 
     def _match_email(self, content):
         email_list = re.findall(
@@ -100,10 +103,10 @@ class WebPage():
                             logging.debug('Contact page uri: {}'.format(link['href']))
                             contact_page = session.get(link['href'])
                             email_list += self._match_email(contact_page.text)
-                            return ', '.join(set(email_list))
                     except:
                         logging.debug('Link has no \'href\' attribute')
-                return ''
+                if email_list:
+                    return ', '.join(set(email_list))
             except requests.exceptions.ConnectTimeout:
                 self.logger.debug(f'Session timeout: {uri}')
                 return ''
