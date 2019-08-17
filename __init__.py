@@ -61,6 +61,17 @@ class WebPage():
         regex = re.search(r'(\d+)', pagination.p.text)
         num_results = int(regex.groups()[0])
         return math.ceil(num_results / 30)
+
+    def _match_email(self, content):
+        email_list = re.findall(
+                r'mailto:([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)', content)
+        if not email_list:
+            email_list = re.findall(
+                r'([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)', content)
+        if email_list:
+            return email_list
+        else:
+            return []
     
     def _get_email_address(self, uri):
         """Scrapes the target URI for one or more email addresses
@@ -71,25 +82,28 @@ class WebPage():
         Returns:
             One or more email address, comma in separated format.
         """
-
+        
         with requests.Session() as session:
             try:
                 self.logger.debug(f'Uri: {uri}')
-                response = session.get(uri, timeout=2)
+                response = session.get(uri, timeout=10)
                 response.raise_for_status()
+                email_list = self._match_email(response.text)
                 parser = BeautifulSoup(response.text, 'html5lib')
                 for link in parser.find_all('a'):
-                    if re.search(r'contact', link['href']):
-                        if re.match(r'^/', link['href']):
-                            link['href'] = uri + link['href']
-                        logging.debug('Contact page uri: {}'.format(link['href']))
-                        contact_page = session.get(link['href'])
-                        email_list = re.findall(r'mailto:([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)', 
-                                                contact_page.text)
-                        if email_list:
-                            return ', '.join(x for x in set(email_list))
-                        else:
-                            return ''
+                    try:
+                        if re.search(r'contact', link['href']):
+                            if re.match(r'^/', link['href']):
+                                link['href'] = uri + link['href']
+                            elif re.match(r'^c', link['href']):
+                                link['href'] = uri + '/' + link['href']
+                            logging.debug('Contact page uri: {}'.format(link['href']))
+                            contact_page = session.get(link['href'])
+                            email_list += self._match_email(contact_page.text)
+                            return ', '.join(set(email_list))
+                    except:
+                        logging.debug('Link has no \'href\' attribute')
+                return ''
             except requests.exceptions.ConnectTimeout:
                 self.logger.debug(f'Session timeout: {uri}')
                 return ''
@@ -118,7 +132,11 @@ class WebPage():
             street = street.get_text(strip=True, separator=" ") if street else ''
             locale = locale.get_text(strip=True, separator=" ") if locale else ''
             website = website['href'] if website else ''
-            email = self._get_email_address(website) if website else ''
+            #email = self._get_email_address(website) if website else ''
+            if website:
+                email = self._get_email_address(website)
+            else: 
+                email = ''
             
             self.logger.debug(f'Name: {name}; Category: {category}; Email: {email}; Phone: {phone}; ' + 
                 f'Street: {street}; Locality: {locale}; Website: {website}; Link: {link}')
