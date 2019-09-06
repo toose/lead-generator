@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import re, math, time, csv, os, requests, logging, argparse
+import re, math, time, csv, os, requests, logging, argparse, threading
 from urllib import parse
 from bs4 import BeautifulSoup
 
@@ -24,6 +24,7 @@ class WebPage():
         self.session = requests.Session()
         self.session.headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.95 Safari/537.36'}
         self.logger = logging.getLogger('scrape.webpage')
+        self.results = []
 
     def _get_uri(self, search=None):
         """Creates the full url to fetch results from.
@@ -52,7 +53,7 @@ class WebPage():
         if page is not None:
             search_terms.append(('page', page))
         uri = self._get_uri(search_terms)
-        response = self.session.get(uri)
+        response = self.session.get(uri, timeout=10)
         response.raise_for_status()
         return response
 
@@ -101,7 +102,7 @@ class WebPage():
                             elif re.match(r'^c', link['href']):
                                 link['href'] = uri + '/' + link['href']
                             logging.debug('Contact page uri: {}'.format(link['href']))
-                            contact_page = session.get(link['href'])
+                            contact_page = session.get(link['href'], timeout=10)
                             email_list += self._match_email(contact_page.text)
                     except:
                         logging.debug('Link has no \'href\' attribute')
@@ -118,7 +119,6 @@ class WebPage():
                 return ''
 
     def _get_results(self, response):
-        results = []
         parser = BeautifulSoup(response.text, 'html5lib')
         for result in parser.select('.search-results .result'):
             name = result.select_one('.business-name')
@@ -135,7 +135,6 @@ class WebPage():
             street = street.get_text(strip=True, separator=" ") if street else ''
             locale = locale.get_text(strip=True, separator=" ") if locale else ''
             website = website['href'] if website else ''
-            #email = self._get_email_address(website) if website else ''
             if website:
                 email = self._get_email_address(website)
             else: 
@@ -143,13 +142,12 @@ class WebPage():
             
             self.logger.debug(f'Name: {name}; Category: {category}; Email: {email}; Phone: {phone}; ' + 
                 f'Street: {street}; Locality: {locale}; Website: {website}; Link: {link}')
-            results.append({'BusinessName': name, 'Category': category, 
+            self.results.append({'BusinessName': name, 'Category': category, 
                             'Email': email, 'Phone': phone,'Street': street, 
                             'Locale': locale, 'Website': website, 'Link': link})
-        return results
                 
-    def get_leads(self):
-        results = []
+    def _get_lead_list(self):
+        threads = []
         response = self._get_response(self.keyword, self.location)
         parser = BeautifulSoup(response.text, 'html5lib')
         num_pages = self._get_num_pages(parser)
@@ -157,11 +155,16 @@ class WebPage():
         for num in range(1, num_pages):
             self.logger.info(f'Scraping page {num}...')
             response = self._get_response(self.keyword, self.location, num)
+            thread = threading.Thread(target=self._get_results, args=(response,))
+            threads.append(thread)
+            thread.start()
             time.sleep(1)
-            results += self._get_results(response)
-        #self.logger.debug(parsed_results)
-        return results
+        for thread in threads:
+            thread.join()
 
+    def get_leads(self):
+        self._get_lead_list()
+        return self.results
 
 def main():
     parser = argparse.ArgumentParser(description='Sales lead scraper')
@@ -182,29 +185,27 @@ def main():
     logging.basicConfig(level=log_level)
     logger = logging.getLogger('scrape.main')
     
-    lead_list = []
-    for index, location in enumerate(args.location):
-        logger.info(f'Location: {location}')
+    results = []
+    for location in args.location:
         for keyword in args.keyword:
+            logger.info(f'Location: {location}')
             logger.info(f'Keyword: {keyword}')
             web_page = WebPage(keyword=keyword, location=location)
-            results = web_page.get_leads()
-            with open(args.output_file, 'a', newline='') as csvfile:
-                fieldnames = ['BusinessName', 'Category', 'Email', 'Phone', 'Street', 
-                            'City', 'State', 'Zip', 'Website', 'Link']
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                if index == 0:
-                    writer.writeheader()
-                for result in results:
-                    regex = re.compile(r'(.*),\s(\w{2})\s(\d{5})')
-                    match = regex.match(result['Locale'])
-                    result['City'] = match.groups()[0] if match else ''
-                    result['State'] = match.groups()[1] if match else ''
-                    result['Zip'] = match.groups()[2] if match else ''
-                    del result['Locale']
-                    writer.writerow(result)
-
-            logger.info(f'Lead file created successfully: {args.output_file}')
+            results += web_page.get_leads()
+    with open(args.output_file, 'a', newline='') as csvfile:
+        fieldnames = ['BusinessName', 'Category', 'Email', 'Phone', 'Street', 
+                    'City', 'State', 'Zip', 'Website', 'Link']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        for result in results:
+            regex = re.compile(r'(.*),\s(\w{2})\s(\d{5})')
+            match = regex.match(result['Locale'])
+            result['City'] = match.groups()[0] if match else ''
+            result['State'] = match.groups()[1] if match else ''
+            result['Zip'] = match.groups()[2] if match else ''
+            del result['Locale']
+            writer.writerow(result)
+    logger.info(f'Lead file created successfully: {args.output_file}')
 
     
 if __name__ == '__main__':
