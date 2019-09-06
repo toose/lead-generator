@@ -155,6 +155,7 @@ class WebPage():
         num_pages = self._get_num_pages(parser)
         self.logger.info(f'{num_pages} total pages of results')
         for num in range(1, num_pages):
+            self.logger.info(f'Scraping page {num}...')
             response = self._get_response(self.keyword, self.location, num)
             time.sleep(1)
             results += self._get_results(response)
@@ -164,8 +165,8 @@ class WebPage():
 
 def main():
     parser = argparse.ArgumentParser(description='Sales lead scraper')
-    parser.add_argument('-k', '--keyword', required=True)
-    parser.add_argument('-l', '--location', required=True)
+    parser.add_argument('-k', '--keyword', required=True, nargs='+')
+    parser.add_argument('-l', '--location', required=True, nargs='+')
     parser.add_argument('-o', '--output-file', required=True)
     parser.add_argument('-v', '--verbose', action='count')
     args = parser.parse_args()
@@ -182,23 +183,28 @@ def main():
     logger = logging.getLogger('scrape.main')
     
     lead_list = []
-    web_page = WebPage(keyword=args.keyword, location=args.location)
-    results = web_page.get_leads()
-    with open(args.output_file, 'w', newline='') as csvfile:
-        fieldnames = ['BusinessName', 'Category', 'Email', 'Phone', 'Street', 
-                      'City', 'State', 'Zip', 'Website', 'Link']
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        writer.writeheader()
-        for result in results:
-            regex = re.compile(r'(.*),\s(\w{2})\s(\d{5})')
-            match = regex.match(result['Locale'])
-            result['City'] = match.groups()[0] if match else ''
-            result['State'] = match.groups()[1] if match else ''
-            result['Zip'] = match.groups()[2] if match else ''
-            del result['Locale']
-            writer.writerow(result)
+    for index, location in enumerate(args.location):
+        logger.info(f'Location: {location}')
+        for keyword in args.keyword:
+            logger.info(f'Keyword: {keyword}')
+            web_page = WebPage(keyword=keyword, location=location)
+            results = web_page.get_leads()
+            with open(args.output_file, 'a', newline='') as csvfile:
+                fieldnames = ['BusinessName', 'Category', 'Email', 'Phone', 'Street', 
+                            'City', 'State', 'Zip', 'Website', 'Link']
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                if index == 0:
+                    writer.writeheader()
+                for result in results:
+                    regex = re.compile(r'(.*),\s(\w{2})\s(\d{5})')
+                    match = regex.match(result['Locale'])
+                    result['City'] = match.groups()[0] if match else ''
+                    result['State'] = match.groups()[1] if match else ''
+                    result['Zip'] = match.groups()[2] if match else ''
+                    del result['Locale']
+                    writer.writerow(result)
 
-    logger.info(f'Lead file created successfully: {args.output_file}')
+            logger.info(f'Lead file created successfully: {args.output_file}')
 
     
 if __name__ == '__main__':
