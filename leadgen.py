@@ -22,7 +22,11 @@ class WebPage():
         self.keyword = keyword
         self.location = location
         self.session = requests.Session()
-        self.session.headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.95 Safari/537.36'}
+        self.session.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:68.0) Gecko/20100101 Firefox/68.0',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Connection': 'keep-alive'
+        }
         self.logger = logging.getLogger('scrape.webpage')
         self.results = []
 
@@ -53,8 +57,12 @@ class WebPage():
         if page is not None:
             search_terms.append(('page', page))
         uri = self._get_uri(search_terms)
-        response = self.session.get(uri, timeout=10)
-        response.raise_for_status()
+        try:
+            #time.sleep(3)
+            response = self.session.get(uri, timeout=10)
+            response.raise_for_status()
+        except:
+            response = None
         return response
 
     def _get_num_pages(self, parser):
@@ -90,24 +98,28 @@ class WebPage():
         with requests.Session() as session:
             try:
                 self.logger.debug(f'Uri: {uri}')
-                response = session.get(uri, timeout=10)
-                response.raise_for_status()
-                email_list = self._match_email(response.text)
-                parser = BeautifulSoup(response.text, 'html5lib')
-                for link in parser.find_all('a'):
-                    try:
-                        if re.search(r'contact', link['href']):
-                            if re.match(r'^/', link['href']):
-                                link['href'] = uri + link['href']
-                            elif re.match(r'^c', link['href']):
-                                link['href'] = uri + '/' + link['href']
-                            logging.debug('Contact page uri: {}'.format(link['href']))
-                            contact_page = session.get(link['href'], timeout=10)
-                            email_list += self._match_email(contact_page.text)
-                    except:
-                        logging.debug('Link has no \'href\' attribute')
-                if email_list:
-                    return ', '.join(set(email_list))
+                try:
+                    response = session.get(uri, timeout=10)
+                    response.raise_for_status()
+                except:
+                    response = None
+                if response is not None:
+                    email_list = self._match_email(response.text)
+                    parser = BeautifulSoup(response.text, 'html5lib')
+                    for link in parser.find_all('a'):
+                        try:
+                            if re.search(r'contact', link['href']):
+                                if re.match(r'^/', link['href']):
+                                    link['href'] = uri + link['href']
+                                elif re.match(r'^c', link['href']):
+                                    link['href'] = uri + '/' + link['href']
+                                logging.debug('Contact page uri: {}'.format(link['href']))
+                                contact_page = session.get(link['href'], timeout=10)
+                                email_list += self._match_email(contact_page.text)
+                        except:
+                            logging.debug('Link has no \'href\' attribute')
+                    if email_list:
+                        return ', '.join(set(email_list))
             except requests.exceptions.ConnectTimeout:
                 self.logger.debug(f'Session timeout: {uri}')
                 return ''
@@ -139,7 +151,7 @@ class WebPage():
                 email = self._get_email_address(website)
             else: 
                 email = ''
-            
+            self.logger.info(f'Local: {locale} || Email: {email}')
             self.logger.debug(f'Name: {name}; Category: {category}; Email: {email}; Phone: {phone}; ' + 
                 f'Street: {street}; Locality: {locale}; Website: {website}; Link: {link}')
             self.results.append({'BusinessName': name, 'Category': category, 
@@ -149,18 +161,20 @@ class WebPage():
     def _get_lead_list(self):
         threads = []
         response = self._get_response(self.keyword, self.location)
-        parser = BeautifulSoup(response.text, 'html5lib')
-        num_pages = self._get_num_pages(parser)
-        self.logger.info(f'{num_pages} total pages of results')
-        for num in range(1, num_pages):
-            self.logger.info(f'Scraping page {num}...')
-            response = self._get_response(self.keyword, self.location, num)
-            thread = threading.Thread(target=self._get_results, args=(response,))
-            threads.append(thread)
-            thread.start()
-            time.sleep(1)
-        for thread in threads:
-            thread.join()
+        if response is not None:
+            parser = BeautifulSoup(response.text, 'html5lib')
+            num_pages = self._get_num_pages(parser)
+            self.logger.info(f'{num_pages} total pages of results')
+            for num in range(1, num_pages):
+                self.logger.info(f'Scraping page {num}...')
+                response = self._get_response(self.keyword, self.location, num)
+                if response is not None:
+                    thread = threading.Thread(target=self._get_results, args=(response,))
+                    threads.append(thread)
+                    thread.start()
+                    time.sleep(1)
+            for thread in threads:
+                thread.join()
 
     def get_leads(self):
         self._get_lead_list()
